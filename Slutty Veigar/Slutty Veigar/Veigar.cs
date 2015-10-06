@@ -7,6 +7,7 @@ using LeagueSharp;
 using LeagueSharp.Common;
 using SharpDX;
 using Color = System.Drawing.Color;
+using SPrediction;
 
 namespace Slutty_Veigar
 {
@@ -35,16 +36,17 @@ namespace Slutty_Veigar
 
             MenuConfig.OnLoad();
             Config.AddToMainMenu();
+            
             Q = new Spell(SpellSlot.Q, 900);
             W = new Spell(SpellSlot.W, 880);
-            E = new Spell(SpellSlot.E, 700);
+            E = new Spell(SpellSlot.E, 800);
             R = new Spell(SpellSlot.R, 650);
-
+            SPrediction.Prediction.Initialize(Config);
             DamageToUnit = GetComboDamage;
 
             Q.SetSkillshot(0.25f, 70f, 2000f, false, SkillshotType.SkillshotLine);
             W.SetSkillshot(2f, 225f, float.MaxValue, false, SkillshotType.SkillshotCircle);
-            E.SetSkillshot(0.5f, 40f, float.MaxValue, false, SkillshotType.SkillshotCircle);
+            E.SetSkillshot(0.5f, 70f, 1500f, false, SkillshotType.SkillshotCircle);
           //  Ew.SetSkillshot(0.5f, 50f, float.MaxValue, false, SkillshotType.SkillshotCircle);
 
             Game.OnUpdate += OnUpdate;
@@ -129,12 +131,12 @@ namespace Slutty_Veigar
             if (target.HasBuffOfType(BuffType.Stun))
                 W.Cast(target.Position);
 
-
-            if (target.IsValidTarget(E.Range) && E.IsReady() && target.HasBuffOfType(BuffType.Stun))
-            {
-                var pred = E.GetPrediction(target).CastPosition;
-                E.Cast(pred.Extend(Player.ServerPosition, 375));
-            }
+//
+//            if (target.IsValidTarget(E.Range) && E.IsReady() && target.HasBuffOfType(BuffType.Stun))
+//            {
+//                var pred = E.GetPrediction(target).CastPosition;
+//                E.Cast(pred.Extend(Player.ServerPosition, 375));
+//            }
 
             if (Ignite.IsReady() && target.Health <= (Q.GetDamage(target) + Player.GetAutoAttackDamage(target)))
                 Player.Spellbook.CastSpell(Ignite, target);
@@ -155,12 +157,14 @@ namespace Slutty_Veigar
 
             if (ksw && target.Health <= W.GetDamage(target))
             {
-                W.Cast(target);
+                W.Cast(target.Position);
             }
-
-            if (ksr && target.Health <= R.GetDamage(target))
+            foreach (var hero in HeroManager.Enemies)
             {
-                R.Cast(target);
+                if (ksr && hero.Health <= R.GetDamage(hero) && GetStringValue("user" + hero.ChampionName) == 0)
+                {
+                    R.Cast(target);
+                }
             }
 
         }
@@ -204,7 +208,7 @@ namespace Slutty_Veigar
                         }
                     }
 
-                    var prediction = Prediction.GetPrediction(minions, Q.Delay);
+                    var prediction = LeagueSharp.Common.Prediction.GetPrediction(minions, Q.Delay);
 
                     var collision = Q.GetCollision(Player.Position.To2D(),
                         new List<Vector2> {prediction.UnitPosition.To2D()});
@@ -268,7 +272,7 @@ namespace Slutty_Veigar
 
             foreach (var minions in minion)
             {
-                var prediction = Prediction.GetPrediction(minions, Q.Delay);
+                var prediction = LeagueSharp.Common.Prediction.GetPrediction(minions, Q.Delay);
 
                 var collision = Q.GetCollision(Player.Position.To2D(),
                     new List<Vector2> { prediction.UnitPosition.To2D() });
@@ -362,7 +366,7 @@ namespace Slutty_Veigar
             }
             foreach (var minions in minion)
             {
-                var prediction = Prediction.GetPrediction(minions, Q.Delay);
+                var prediction = LeagueSharp.Common.Prediction.GetPrediction(minions, Q.Delay);
 
                 var collision = Q.GetCollision(Player.Position.To2D(),
                     new List<Vector2> { prediction.UnitPosition.To2D() });
@@ -440,18 +444,27 @@ namespace Slutty_Veigar
             if (target.HasBuffOfType(BuffType.Invulnerability)) return;
             if (!GetBool(name, typeof(bool))) return;
             if (!R.IsReady() || !target.IsValidTarget(R.Range)) return;
-            if (R.GetDamage(target) < target.Health) return;
+            var prediction = LeagueSharp.Common.Prediction.GetPrediction(target, Q.Delay);
 
+            var collision = Q.GetCollision(Player.Position.To2D(),
+                new List<Vector2> { prediction.UnitPosition.To2D() });
             foreach (var targets in HeroManager.Enemies)
             {
-                if (GetStringValue("user" + targets.ChampionName) == 0) 
-                R.Cast(target);
+            if (
+                (R.GetDamage(targets) + Q.GetDamage(targets) >= targets.Health && Q.IsReady() && !collision.Any()) ||
+                (R.GetDamage(targets) + W.GetDamage(targets) >= targets.Health && W.IsReady() && target.HasBuffOfType(BuffType.Stun) && target.Distance(Player) < W.Range) ||
+                (R.GetDamage(targets) + Q.GetDamage(targets) + IgniteDamage(targets) >= targets.Health && Ignite.IsReady() && Q.IsReady() && !collision.Any()) ||
+                (R.GetDamage(targets) + IgniteDamage(targets) >= targets.Health && Ignite.IsReady()))
+            {
+                    if (GetStringValue("user" + targets.ChampionName) == 0)
+                        R.Cast(targets);
+                }
             }
         }
 
         public static void QColCast(Obj_AI_Hero target, bool col = true)
         {
-            var prediction = Prediction.GetPrediction(target, Q.Delay);
+            var prediction = LeagueSharp.Common.Prediction.GetPrediction(target, Q.Delay);
 
             var collision = Q.GetCollision(Player.Position.To2D(),
                 new List<Vector2> { prediction.UnitPosition.To2D() });
@@ -510,23 +523,35 @@ namespace Slutty_Veigar
 //            var targetPos = pred.UnitPosition;
 //            E.Cast(targetPos.Extend(Player.Position, 220).To2D());
 
-            var epred = E.GetPrediction(target);
+//            var epred = E.GetPrediction(target);
+//            var pos = epred.CastPosition;
+//            if (pos.Distance(Player.Position) < E.Range
+//                && epred.Hitchance >= HitChance.VeryHigh)
+//            {
+//                if (Utility.IsBothFacing(Player, target))
+//                {
+//                    E.Cast(pos.Extend(Player.Position, 300));
+//                }
+//                else if (Player.IsFacing(target) && !target.IsFacing(Player))
+//                {
+//                    E.Cast(pos.Extend(Player.Position, 150));
+//                }
+//                else if (!Player.IsFacing(target) && targetIsFacing(Player))
+//                {
+//                    E.Cast(pos.Extend(Player.Position, 300));
+//                }
+//            }
+
+            var epred = E.GetSPrediction(target);
             var pos = epred.CastPosition;
-            if (pos.Distance(Player.Position) < E.Range
-                && epred.Hitchance >= HitChance.VeryHigh)
+            if ((epred.HitChance >= HitChance.VeryHigh || epred.HitChance == HitChance.Immobile) && target.Distance(Player) < 300)
             {
-                if (Utility.IsBothFacing(Player, target))
-                {
-                    E.Cast(pos.Extend(Player.Position, 300));
-                }
-                else if (Player.IsFacing(target) && !target.IsFacing(Player))
-                {
-                    E.Cast(pos.Extend(Player.Position, 150));
-                }
-                else if (!Player.IsFacing(target) && target.IsFacing(Player))
-                {
-                    E.Cast(pos.Extend(Player.Position, 300));
-                }
+                E.Cast(pos.Extend(Player.Position.To2D(), 100));
+            }
+
+            if ((epred.HitChance >= HitChance.VeryHigh || epred.HitChance == HitChance.Immobile) && target.Distance(Player) > 300)
+            {
+                E.Cast(pos.Extend(Player.Position.To2D(), 375));
             }
             // E.Cast(targetPos);
 
@@ -537,11 +562,11 @@ namespace Slutty_Veigar
             if (!target.IsValidTarget(W.Range) || !W.IsReady()) return;
             if ((!Player.HasBuffOfType(BuffType.Stun) && !Player.HasBuffOfType(BuffType.Taunt) &&
                  !Player.HasBuffOfType(BuffType.Snare)) && Environment.TickCount - laste < 1500) return;
-
+            var wpred = W.GetSPrediction(target);
             switch (GetStringValue(name))
                 {
                     case 0:
-                        W.Cast(target.Position);
+                        W.Cast(wpred.CastPosition);
                         break;
                     case 1:
                         if (target.HasBuffOfType(BuffType.Stun) || target.HasBuffOfType(BuffType.Snare) || target.HasBuffOfType(BuffType.Taunt))
